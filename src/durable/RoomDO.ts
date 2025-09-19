@@ -28,12 +28,12 @@ export class RoomDO {
     this.count++;
     this.broadcast();
 
-    // 接続が切れたとき
-    writer.closed.then(() => {
+    // 🔔 クライアント切断を監視
+    readable.cancel = async () => {
       this.connections.delete(writer);
       this.count--;
       this.broadcast();
-    });
+    };
 
     const headers = {
       "Content-Type": "text/event-stream",
@@ -51,7 +51,7 @@ export class RoomDO {
 
     for (const writer of this.connections) {
       writer.write(data).catch(() => {
-        // 書き込み失敗は削除対象にできる
+        // 書き込み失敗時は無視（削除は cancel ハンドラで行う）
       });
     }
   }
