@@ -26,6 +26,11 @@ export class SSEManager {
         const send = (msg: string) =>
           controller.enqueue(encoder.encode(msg));
 
+        // 🔔 接続直後に必ず1発Initを送る（直enqueue）
+        const init = room.makeInit();
+        send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
+
+        // 接続を登録
         if (token) {
           this.addConnection(
             token,
@@ -35,10 +40,7 @@ export class SSEManager {
           );
         }
 
-        // 接続直後に Init を broadcast 経由で送信
-        this.broadcast("Init", room.makeInit());
-
-        // Pulse を定期送信（これも broadcast 経由）
+        // Pulse（下りの心拍）は broadcast 経由
         const interval = setInterval(() => {
           this.broadcast("Pulse", "");
         }, 10000);
