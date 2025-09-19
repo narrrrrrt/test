@@ -1,5 +1,3 @@
-import type { InitData, SSEMessage } from "./types";
-
 export class SSEManager {
   private connections: Map<string, WritableStreamDefaultWriter> = new Map();
   private queue: string[] = [];
@@ -13,34 +11,51 @@ export class SSEManager {
     this.onRemove = onRemove;
   }
 
-  // 新しい接続を登録
-  addConnection(token: string, writer: WritableStreamDefaultWriter) {
-    this.connections.set(token, writer);
+  handleConnection(token: string | null): Response {
+    const encoder = new TextEncoder();
 
-    // ✅ 接続直後に Init を即送信（true/false の状態付き）
-    const init = this.getInit();
-    const initMsg =
-      `event: Init\n` +
-      `data: ${JSON.stringify(init)}\n\n`;
-    this.queue.push(initMsg);
-    this.flush();
+    const stream = new ReadableStream({
+      start: async (controller) => {
+        const writer = controller.writable.getWriter();
+
+        // ✅ Init を即送信（この時点の Room 状態）
+        const init = this.getInit();
+        const initMsg = `event: Init\ndata: ${JSON.stringify(init)}\n\n`;
+        await writer.write(encoder.encode(initMsg));
+
+        if (token) {
+          this.connections.set(token, writer);
+
+          // ✅ 切断時にトークン削除
+          controller.closed.then(() => {
+            this.removeConnection(token);
+          });
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+        "Transfer-Encoding": "chunked",
+      },
+    });
   }
 
-  // 接続を削除（切断時に呼ぶ）
   removeConnection(token: string) {
     const writer = this.connections.get(token);
     if (writer) {
-      try {
-        writer.close();
-      } catch {}
+      try { writer.close(); } catch {}
     }
     this.connections.delete(token);
 
-    // ✅ Room にも通知
+    // ✅ Room 側に通知
     this.onRemove(token);
   }
 
-  // ブロードキャスト
   broadcast(payload: SSEMessage) {
     const msg =
       `event: ${payload.event}\n` +
@@ -49,7 +64,6 @@ export class SSEManager {
     this.flush();
   }
 
-  // flush: 順序を守って送信
   private async flush() {
     if (this.flushing) return;
     this.flushing = true;
