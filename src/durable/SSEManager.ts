@@ -18,21 +18,22 @@ export class SSEManager {
       start: (controller) => {
         const writer = controller.writable.getWriter();
 
-        // 接続直後に Init をキューに積む
+        // ✅ 接続直後の Init は即 write（順番を気にしなくていい最初だけ）
         const init = this.getInit();
-        const msg =
+        const initMsg =
           `event: Init\n` +
           `data: ${JSON.stringify(init)}\n\n`;
-        this.enqueue(msg);
+        writer.write(new TextEncoder().encode(initMsg)).catch(() => {});
 
         if (token) {
+          // 管理対象に登録
           this.connections.set(token, writer);
+
           controller.closed.then(() => {
             this.removeConnection(token);
           });
         } else {
-          // tokenなし → 一発Initだけ送って終わり
-          writer.write(new TextEncoder().encode(msg)).catch(() => {});
+          // token 無し → Init を送ったらクローズ
           writer.close().catch(() => {});
         }
       },
