@@ -1,4 +1,4 @@
-export class CounterDO {
+export class RoomDO {
   state: DurableObjectState;
   connections: Set<WritableStreamDefaultWriter>;
   count: number;
