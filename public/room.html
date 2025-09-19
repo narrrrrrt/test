@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Room</title>
+</head>
+<body>
+  <h1>Room</h1>
+  <div id="info"></div>
+
+  <div>
+    <button id="joinBtn">Join</button> <span id="joinResult"></span><br>
+    <button id="moveBtn">Move</button> <span id="moveResult"></span><br>
+    <button id="leaveBtn">Leave</button> <span id="leaveResult"></span><br>
+    <button id="resetBtn">Reset</button> <span id="resetResult"></span>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const id = params.get("id");
+    const seat = params.get("seat");
+
+    document.getElementById("info").textContent =
+      `Room ID = ${id}, Seat = ${seat}`;
+
+    async function callApi(action, resultId) {
+      try {
+        const resp = await fetch(`/${id}/${action}?seat=${seat}`, {
+          method: "POST"
+        });
+        const text = await resp.text();
+        document.getElementById(resultId).textContent = text;
+      } catch (err) {
+        document.getElementById(resultId).textContent = "Error: " + err;
+      }
+    }
+
+    document.getElementById("joinBtn").onclick = () => callApi("join", "joinResult");
+    document.getElementById("moveBtn").onclick = () => callApi("move", "moveResult");
+    document.getElementById("leaveBtn").onclick = () => callApi("leave", "leaveResult");
+    document.getElementById("resetBtn").onclick = () => callApi("reset", "resetResult");
+  </script>
+</body>
+</html>

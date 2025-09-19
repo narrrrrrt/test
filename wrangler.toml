@@ -1,0 +1,24 @@
+name = "test"
+main = "src/index.ts"
+compatibility_date = "2023-11-01"
+
+compatibility_flags = ["durable_object_alarms"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "RoomDO"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]
+
+[vars]
+HEARTBEAT_TIMEOUT = "30000"
+LASTUPDATE_TIMEOUT = "300000"
+
+[ai]
+binding = "AI"
