@@ -1,3 +1,5 @@
+import type { Room } from "./Room";
+
 export class SSEManager {
   private connections: Map<
     string,
@@ -6,6 +8,52 @@ export class SSEManager {
 
   constructor() {
     this.connections = new Map();
+  }
+
+  // --- DOから直接呼ばれる: SSE接続開始 ---
+  handleConnection(room: Room, token?: string): Response {
+    const headers = {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+      "Transfer-Encoding": "chunked",
+    };
+
+    const stream = new ReadableStream({
+      start: (controller) => {
+        const encoder = new TextEncoder();
+        const send = (msg: string) =>
+          controller.enqueue(encoder.encode(msg));
+
+        // Init送信
+        const init = room.makeInit();
+        send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
+
+        // Pulse送信（下りの心拍）
+        const interval = setInterval(() => {
+          send(`event: Pulse\ndata:\n\n`);
+        }, 10000);
+
+        if (token) {
+          this.addConnection(
+            token,
+            send,
+            controller.closed,
+            () => room.removeSession(token)
+          );
+        }
+
+        controller.closed.then(() => {
+          clearInterval(interval);
+          if (token) {
+            room.removeSession(token);
+          }
+        });
+      },
+    });
+
+    return new Response(stream, { headers });
   }
 
   addConnection(
@@ -37,12 +85,11 @@ export class SSEManager {
 
   broadcast(event: string, data: any) {
     if (this.connections.size === 0) {
-      return; // 誰も繋がっていなければ何もしない
+      return;
     }
-
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
-    for (const [token, conn] of this.connections) {
+    for (const conn of this.connections.values()) {
       if (!conn.active) continue;
       conn.queue.push(payload);
       this.processQueue(conn);
