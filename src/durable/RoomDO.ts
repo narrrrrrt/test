@@ -1,26 +1,47 @@
+import { Room } from "./Room";
+import { createSSE } from "./handlers/sse";
+import { join } from "./handlers/join";
+import { move } from "./handlers/move";
+import { leave } from "./handlers/leave";
+import { reset } from "./handlers/reset";
+
 export class RoomDO {
   state: DurableObjectState;
-  env: Env;
-  roomName: string;
+  room: Room;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
-    this.env = env;
-    // ここで name を取っておく。undefined の場合は fallback。
-    this.roomName = state.id.name ?? "unknown";
+    this.room = new Room();
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const path = url.pathname;
 
-    const data = {
-      roomId: this.roomName,
-      pathname: url.pathname,
-      searchParams: Object.fromEntries(url.searchParams),
-    };
+    // --- パラメータ抽出 ---
+    let params: Record<string, string> = Object.fromEntries(url.searchParams);
+    if (request.method === "POST") {
+      try {
+        const body = await request.json();
+        params = { ...params, ...body };
+      } catch {}
+    }
 
-    return new Response(JSON.stringify(data, null, 2), {
-      headers: { "Content-Type": "application/json" },
-    });
+    // --- SSE ---
+    if (path === "/sse") {
+      const token = params.token;
+      return createSSE(this.room, token);
+    }
+
+    // --- ハンドラーマップ ---
+    const handlers = { join, move, leave, reset } as const;
+
+    const endpoint = path.replace(/^\//, "");
+    const handler = (handlers as any)[endpoint];
+    if (handler) {
+      return handler(this.room, params);
+    }
+
+    return new Response("Unknown endpoint", { status: 404 });
   }
 }
