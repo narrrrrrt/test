@@ -10,7 +10,7 @@ export class SSEManager {
     this.connections = new Map();
   }
 
-  // --- DOから直接呼ばれる: SSE接続開始 ---
+  // --- Durable Object から呼ばれる: SSE接続開始 ---
   handleConnection(room: Room, token?: string): Response {
     const headers = {
       "Content-Type": "text/event-stream",
@@ -26,15 +26,6 @@ export class SSEManager {
         const send = (msg: string) =>
           controller.enqueue(encoder.encode(msg));
 
-        // Init送信
-        const init = room.makeInit();
-        send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
-
-        // Pulse送信（下りの心拍）
-        const interval = setInterval(() => {
-          send(`event: Pulse\ndata:\n\n`);
-        }, 10000);
-
         if (token) {
           this.addConnection(
             token,
@@ -43,6 +34,14 @@ export class SSEManager {
             () => room.removeSession(token)
           );
         }
+
+        // 接続直後に Init を broadcast 経由で送信
+        this.broadcast("Init", room.makeInit());
+
+        // Pulse を定期送信（これも broadcast 経由）
+        const interval = setInterval(() => {
+          this.broadcast("Pulse", "");
+        }, 10000);
 
         controller.closed.then(() => {
           clearInterval(interval);
@@ -56,6 +55,7 @@ export class SSEManager {
     return new Response(stream, { headers });
   }
 
+  // --- 接続登録 ---
   addConnection(
     token: string,
     send: (msg: string) => void,
@@ -79,15 +79,19 @@ export class SSEManager {
     });
   }
 
+  // --- 接続削除 ---
   removeConnection(token: string) {
     this.connections.delete(token);
   }
 
+  // --- 全員に送信（順序保証あり） ---
   broadcast(event: string, data: any) {
     if (this.connections.size === 0) {
-      return;
+      return; // 誰もいなければ何もしない
     }
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+    const payload =
+      `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
     for (const conn of this.connections.values()) {
       if (!conn.active) continue;
@@ -96,6 +100,7 @@ export class SSEManager {
     }
   }
 
+  // --- 内部処理: キューを順に処理 ---
   private async processQueue(conn: {
     send: (msg: string) => void;
     queue: string[];
