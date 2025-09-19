@@ -1,4 +1,4 @@
-import type { InitData } from "./types";
+import type { InitData, SSEMessage } from "./types";
 
 export class SSEManager {
   private connections: Map<string, WritableStreamDefaultWriter> = new Map();
@@ -13,28 +13,27 @@ export class SSEManager {
     this.onRemove = onRemove;
   }
 
+  // --- SSE接続を開始 ---
   handleConnection(token: string | null): Response {
     const stream = new ReadableStream({
       start: (controller) => {
         const writer = controller.writable.getWriter();
 
-        // ✅ 接続直後の Init は即 write（順番を気にしなくていい最初だけ）
+        // Init を queue に積んで flush
         const init = this.getInit();
         const initMsg =
           `event: Init\n` +
           `data: ${JSON.stringify(init)}\n\n`;
-        writer.write(new TextEncoder().encode(initMsg)).catch(() => {});
+        this.queue.push(initMsg);
+        this.flush();
 
         if (token) {
-          // 管理対象に登録
           this.connections.set(token, writer);
 
+          // 切断時に token を削除
           controller.closed.then(() => {
             this.removeConnection(token);
           });
-        } else {
-          // token 無し → Init を送ったらクローズ
-          writer.close().catch(() => {});
         }
       },
     });
@@ -50,11 +49,30 @@ export class SSEManager {
     });
   }
 
-  private enqueue(msg: string) {
+  // --- 接続削除 ---
+  removeConnection(token: string) {
+    const writer = this.connections.get(token);
+    if (writer) {
+      try {
+        writer.close();
+      } catch {}
+    }
+    this.connections.delete(token);
+
+    // Room にも通知
+    this.onRemove(token);
+  }
+
+  // --- メッセージ送信（broadcast） ---
+  broadcast(payload: SSEMessage) {
+    const msg =
+      `event: ${payload.event}\n` +
+      `data: ${JSON.stringify(payload.data ?? {})}\n\n`;
     this.queue.push(msg);
     this.flush();
   }
 
+  // --- flush: 順序保証付きで送信 ---
   private async flush() {
     if (this.flushing) return;
     this.flushing = true;
@@ -77,23 +95,5 @@ export class SSEManager {
     }
 
     this.flushing = false;
-  }
-
-  broadcast(event: string, data: any) {
-    const msg =
-      `event: ${event}\n` +
-      `data: ${JSON.stringify(data ?? {})}\n\n`;
-    this.enqueue(msg);
-  }
-
-  removeConnection(token: string) {
-    const writer = this.connections.get(token);
-    if (writer) {
-      try {
-        writer.close();
-      } catch {}
-    }
-    this.connections.delete(token);
-    this.onRemove(token);
   }
 }
