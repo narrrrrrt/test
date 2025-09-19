@@ -1,5 +1,4 @@
 import { Room } from "./Room";
-import { createSSE } from "./handlers/sse";
 import { join } from "./handlers/join";
 import { move } from "./handlers/move";
 import { leave } from "./handlers/leave";
@@ -18,7 +17,6 @@ export class RoomDO {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // --- パラメータ抽出 ---
     let params: Record<string, string> = Object.fromEntries(url.searchParams);
     if (request.method === "POST") {
       try {
@@ -29,13 +27,11 @@ export class RoomDO {
 
     // --- SSE ---
     if (path === "/sse") {
-      const token = params.token;
-      return createSSE(this.room, token);
+      return this.room.sse.handleConnection(this.room, params.token);
     }
 
     // --- ハンドラーマップ ---
     const handlers = { join, move, leave, reset } as const;
-
     const endpoint = path.replace(/^\//, "");
     const handler = (handlers as any)[endpoint];
     if (handler) {

@@ -5,10 +5,58 @@ export class SSEManager {
     this.connections = new Map();
   }
 
-  addConnection(token: string, send: (msg: string) => void, closed: Promise<void>, onClose: () => void) {
-    this.connections.set(token, send);
+  handleConnection(room: any, token?: string): Response {
+    const headers = {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+      "Transfer-Encoding": "chunked",
+    };
 
-    // 切断検知
+    const stream = new ReadableStream({
+      start: (controller) => {
+        const encoder = new TextEncoder();
+        const send = (msg: string) =>
+          controller.enqueue(encoder.encode(msg));
+
+        // Initを送信
+        const init = room.makeInit();
+        send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
+
+        // Pulseを定期送信
+        const interval = setInterval(() => {
+          send(`event: Pulse\ndata:\n\n`);
+        }, 10000);
+
+        if (token) {
+          this.addConnection(
+            token,
+            send,
+            controller.closed,
+            () => room.removeSession(token)
+          );
+        }
+
+        controller.closed.then(() => {
+          clearInterval(interval);
+          if (token) {
+            room.removeSession(token);
+          }
+        });
+      },
+    });
+
+    return new Response(stream, { headers });
+  }
+
+  addConnection(
+    token: string,
+    send: (msg: string) => void,
+    closed: Promise<void>,
+    onClose: () => void
+  ) {
+    this.connections.set(token, send);
     closed.then(() => {
       this.removeConnection(token);
       onClose();
