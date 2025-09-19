@@ -24,16 +24,17 @@ export class RoomDO {
     const writer = writable.getWriter();
     this.connections.add(writer);
 
-    // 接続数 +1
+    // 接続数を +1 して全員に通知
     this.count++;
     this.broadcast();
 
     // 🔔 クライアント切断を監視
-    readable.cancel = async () => {
+    const reader = readable.getReader();
+    reader.closed.then(() => {
       this.connections.delete(writer);
       this.count--;
       this.broadcast();
-    };
+    });
 
     const headers = {
       "Content-Type": "text/event-stream",
@@ -45,13 +46,16 @@ export class RoomDO {
   }
 
   private broadcast() {
-    const msg = `event: stats\ndata: ${JSON.stringify({ connections: this.count })}\n\n`;
+    const msg =
+      `event: stats\n` +
+      `data: ${JSON.stringify({ connections: this.count })}\n\n`;
+
     const encoder = new TextEncoder();
     const data = encoder.encode(msg);
 
     for (const writer of this.connections) {
       writer.write(data).catch(() => {
-        // 書き込み失敗時は無視（削除は cancel ハンドラで行う）
+        // 書き込み失敗は無視
       });
     }
   }
