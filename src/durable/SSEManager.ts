@@ -13,43 +13,20 @@ export class SSEManager {
     this.onRemove = onRemove;
   }
 
-  // --- SSE接続を開始 ---
-  handleConnection(token: string | null): Response {
-    const stream = new ReadableStream({
-      start: (controller) => {
-        const writer = controller.writable.getWriter();
+  // 新しい接続を登録
+  addConnection(token: string, writer: WritableStreamDefaultWriter) {
+    this.connections.set(token, writer);
 
-        // Init を queue に積んで flush
-        const init = this.getInit();
-        const initMsg =
-          `event: Init\n` +
-          `data: ${JSON.stringify(init)}\n\n`;
-        this.queue.push(initMsg);
-        this.flush();
-
-        if (token) {
-          this.connections.set(token, writer);
-
-          // 切断時に token を削除
-          controller.closed.then(() => {
-            this.removeConnection(token);
-          });
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-        "Transfer-Encoding": "chunked",
-      },
-    });
+    // ✅ 接続直後に Init を即送信（true/false の状態付き）
+    const init = this.getInit();
+    const initMsg =
+      `event: Init\n` +
+      `data: ${JSON.stringify(init)}\n\n`;
+    this.queue.push(initMsg);
+    this.flush();
   }
 
-  // --- 接続削除 ---
+  // 接続を削除（切断時に呼ぶ）
   removeConnection(token: string) {
     const writer = this.connections.get(token);
     if (writer) {
@@ -59,11 +36,11 @@ export class SSEManager {
     }
     this.connections.delete(token);
 
-    // Room にも通知
+    // ✅ Room にも通知
     this.onRemove(token);
   }
 
-  // --- メッセージ送信（broadcast） ---
+  // ブロードキャスト
   broadcast(payload: SSEMessage) {
     const msg =
       `event: ${payload.event}\n` +
@@ -72,7 +49,7 @@ export class SSEManager {
     this.flush();
   }
 
-  // --- flush: 順序保証付きで送信 ---
+  // flush: 順序を守って送信
   private async flush() {
     if (this.flushing) return;
     this.flushing = true;
