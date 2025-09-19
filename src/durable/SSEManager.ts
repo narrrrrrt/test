@@ -1,131 +1,71 @@
-import type { InitData, SSEEvent } from "./types";
-import type { Room } from "./Room";
+import type { InitData } from "./types";
 
 export class SSEManager {
-  private connections: Map<
-    string,
-    { send: (msg: string) => void; queue: string[]; active: boolean; processing: boolean }
-  >;
+  private connections: Map<string, WritableStreamDefaultWriter> = new Map();
   private getInit: () => InitData;
   private onRemove: (token: string) => void;
 
   constructor(getInit: () => InitData, onRemove: (token: string) => void) {
-    this.connections = new Map();
     this.getInit = getInit;
     this.onRemove = onRemove;
   }
 
-  // --- Durable Object から呼ばれる: SSE接続開始 ---
-  handleConnection(room: Room, token?: string): Response {
-    const headers = {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "X-Accel-Buffering": "no",
-      "Transfer-Encoding": "chunked",
-    };
-
+  handleConnection(token: string | null): Response {
     const stream = new ReadableStream({
       start: (controller) => {
-        const encoder = new TextEncoder();
-        const send = (msg: string) =>
-          controller.enqueue(encoder.encode(msg));
+        const writer = controller.writable.getWriter();
 
-        // 👇 接続直後に必ず Init を送る（直 enqueue）
+        // 接続直後に Init を送信
         const init = this.getInit();
-        send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
+        const msg =
+          `event: Init\n` +
+          `data: ${JSON.stringify(init)}\n\n`;
+        writer.write(new TextEncoder().encode(msg)).catch(() => {});
 
-        // 接続を登録
         if (token) {
-          this.addConnection(
-            token,
-            send,
-            controller.closed,
-            () => this.onRemove(token)
-          );
+          // 管理対象に追加
+          this.connections.set(token, writer);
+
+          // 切断時にセッション削除
+          controller.closed.then(() => {
+            this.removeConnection(token);
+          });
         }
-
-        // Pulse（下りの心拍）は broadcast 経由
-        const interval = setInterval(() => {
-          this.broadcast("Pulse", "");
-        }, 10000);
-
-        controller.closed.then(() => {
-          clearInterval(interval);
-          if (token) {
-            this.onRemove(token);
-          }
-        });
       },
     });
 
-    return new Response(stream, { headers });
-  }
-
-  // --- 接続登録 ---
-  addConnection(
-    token: string,
-    send: (msg: string) => void,
-    closed: Promise<void>,
-    onClose: () => void
-  ) {
-    this.connections.set(token, {
-      send,
-      queue: [],
-      active: true,
-      processing: false,
-    });
-
-    closed.then(() => {
-      const conn = this.connections.get(token);
-      if (conn) {
-        conn.active = false;
-        this.connections.delete(token);
-      }
-      onClose();
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+        "Transfer-Encoding": "chunked",
+      },
     });
   }
 
-  // --- 接続削除 ---
   removeConnection(token: string) {
-    this.connections.delete(token);
-  }
-
-  // --- 全員に送信（順序保証あり） ---
-  broadcast(event: string, data: any) {
-    if (this.connections.size === 0) {
-      return;
-    }
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-
-    for (const conn of this.connections.values()) {
-      if (!conn.active) continue;
-      conn.queue.push(payload);
-      this.processQueue(conn);
-    }
-  }
-
-  // --- 内部処理: キューを順に処理 ---
-  private async processQueue(conn: {
-    send: (msg: string) => void;
-    queue: string[];
-    active: boolean;
-    processing: boolean;
-  }) {
-    if (conn.processing) return;
-    conn.processing = true;
-
-    while (conn.queue.length > 0 && conn.active) {
-      const msg = conn.queue.shift()!;
+    const writer = this.connections.get(token);
+    if (writer) {
       try {
-        conn.send(msg);
-      } catch (err) {
-        console.error("SSE send failed", err);
-        conn.active = false;
-        break;
-      }
+        writer.close();
+      } catch {}
     }
+    this.connections.delete(token);
+    this.onRemove(token);
+  }
 
-    conn.processing = false;
+  broadcast(event: string, data: any) {
+    const msg =
+      `event: ${event}\n` +
+      `data: ${JSON.stringify(data ?? {})}\n\n`;
+    const bytes = new TextEncoder().encode(msg);
+
+    const toRemove: string[] = [];
+    for (const [token, writer] of this.connections) {
+      writer.write(bytes).catch(() => toRemove.push(token));
+    }
+    for (const t of toRemove) this.removeConnection(t);
   }
 }

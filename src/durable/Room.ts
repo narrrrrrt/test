@@ -12,7 +12,6 @@ export class Room {
     // ここでは sse を new しない
   }
 
-  // Room 完成後に呼び出す
   initSSE() {
     this.sse = new SSEManager(
       () => this.makeInit(),
