@@ -1,3 +1,4 @@
+import type { InitData, SSEEvent } from "./types";
 import type { Room } from "./Room";
 
 export class SSEManager {
@@ -5,9 +6,13 @@ export class SSEManager {
     string,
     { send: (msg: string) => void; queue: string[]; active: boolean; processing: boolean }
   >;
+  private getInit: () => InitData;
+  private onRemove: (token: string) => void;
 
-  constructor() {
+  constructor(getInit: () => InitData, onRemove: (token: string) => void) {
     this.connections = new Map();
+    this.getInit = getInit;
+    this.onRemove = onRemove;
   }
 
   // --- Durable Object から呼ばれる: SSE接続開始 ---
@@ -26,8 +31,8 @@ export class SSEManager {
         const send = (msg: string) =>
           controller.enqueue(encoder.encode(msg));
 
-        // 🔔 接続直後に必ず1発Initを送る（直enqueue）
-        const init = room.makeInit();
+        // 👇 接続直後に必ず Init を送る（直 enqueue）
+        const init = this.getInit();
         send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
 
         // 接続を登録
@@ -36,7 +41,7 @@ export class SSEManager {
             token,
             send,
             controller.closed,
-            () => room.removeSession(token)
+            () => this.onRemove(token)
           );
         }
 
@@ -48,7 +53,7 @@ export class SSEManager {
         controller.closed.then(() => {
           clearInterval(interval);
           if (token) {
-            room.removeSession(token);
+            this.onRemove(token);
           }
         });
       },
@@ -89,11 +94,9 @@ export class SSEManager {
   // --- 全員に送信（順序保証あり） ---
   broadcast(event: string, data: any) {
     if (this.connections.size === 0) {
-      return; // 誰もいなければ何もしない
+      return;
     }
-
-    const payload =
-      `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
     for (const conn of this.connections.values()) {
       if (!conn.active) continue;
