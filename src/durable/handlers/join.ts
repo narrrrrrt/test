@@ -16,8 +16,8 @@ export async function join(room: Room, params: Record<string, string>): Promise<
   const res: JoinResponse = { token };
 
   // 🔔 ブロードキャスト (イベント: Join, データ: InitData)
-  //const initData = room.makeInit();
-  //room.sse.broadcast("Join", initData);
+  const initData = room.makeInit();
+  room.sse.broadcast("Join", initData);
 
   return new Response(JSON.stringify(res), {
     headers: { "Content-Type": "application/json" },

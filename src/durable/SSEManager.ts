@@ -1,53 +1,11 @@
 export class SSEManager {
-  private connections: Map<string, (msg: string) => void>;
+  private connections: Map<
+    string,
+    { send: (msg: string) => void; queue: string[]; active: boolean; processing: boolean }
+  >;
 
   constructor() {
     this.connections = new Map();
-  }
-
-  handleConnection(room: any, token?: string): Response {
-    const headers = {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "X-Accel-Buffering": "no",
-      "Transfer-Encoding": "chunked",
-    };
-
-    const stream = new ReadableStream({
-      start: (controller) => {
-        const encoder = new TextEncoder();
-        const send = (msg: string) =>
-          controller.enqueue(encoder.encode(msg));
-
-        // Initを送信
-        const init = room.makeInit();
-        send(`event: Init\ndata: ${JSON.stringify(init)}\n\n`);
-
-        // Pulseを定期送信
-        const interval = setInterval(() => {
-          send(`event: Pulse\ndata:\n\n`);
-        }, 10000);
-
-        if (token) {
-          this.addConnection(
-            token,
-            send,
-            controller.closed,
-            () => room.removeSession(token)
-          );
-        }
-
-        controller.closed.then(() => {
-          clearInterval(interval);
-          if (token) {
-            room.removeSession(token);
-          }
-        });
-      },
-    });
-
-    return new Response(stream, { headers });
   }
 
   addConnection(
@@ -56,9 +14,19 @@ export class SSEManager {
     closed: Promise<void>,
     onClose: () => void
   ) {
-    this.connections.set(token, send);
+    this.connections.set(token, {
+      send,
+      queue: [],
+      active: true,
+      processing: false,
+    });
+
     closed.then(() => {
-      this.removeConnection(token);
+      const conn = this.connections.get(token);
+      if (conn) {
+        conn.active = false;
+        this.connections.delete(token);
+      }
       onClose();
     });
   }
@@ -68,9 +36,39 @@ export class SSEManager {
   }
 
   broadcast(event: string, data: any) {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const send of this.connections.values()) {
-      send(payload);
+    if (this.connections.size === 0) {
+      return; // 誰も繋がっていなければ何もしない
     }
+
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+    for (const [token, conn] of this.connections) {
+      if (!conn.active) continue;
+      conn.queue.push(payload);
+      this.processQueue(conn);
+    }
+  }
+
+  private async processQueue(conn: {
+    send: (msg: string) => void;
+    queue: string[];
+    active: boolean;
+    processing: boolean;
+  }) {
+    if (conn.processing) return;
+    conn.processing = true;
+
+    while (conn.queue.length > 0 && conn.active) {
+      const msg = conn.queue.shift()!;
+      try {
+        conn.send(msg);
+      } catch (err) {
+        console.error("SSE send failed", err);
+        conn.active = false;
+        break;
+      }
+    }
+
+    conn.processing = false;
   }
 }
