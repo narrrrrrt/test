@@ -1,10 +1,12 @@
 export class RoomDO {
   state: DurableObjectState;
+  env: Env;
   roomName: string;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
-    // idFromName に渡した "1" などを name から取り出す
+    this.env = env;
+    // ここで name を取っておく。undefined の場合は fallback。
     this.roomName = state.id.name ?? "unknown";
   }
 
@@ -12,7 +14,7 @@ export class RoomDO {
     const url = new URL(request.url);
 
     const data = {
-      roomId: this.roomName,  // ← "1", "2", "3", "4"
+      roomId: this.roomName,
       pathname: url.pathname,
       searchParams: Object.fromEntries(url.searchParams),
     };
