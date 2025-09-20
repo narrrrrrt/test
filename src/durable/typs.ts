@@ -1,35 +1,38 @@
-// ルームの状態
-export type RoomStatus = "waiting" | "black" | "white" | "leave";
+// Types.ts
 
-// プレイヤーの席
+// --- プレイヤーの席 ---
 export type Seat = "black" | "white" | "observer";
 
-// セッション情報
-export type Session = {
-  seat: Seat;
-  send?: (msg: string) => void;
+// --- ゲーム進行の状態 ---
+export type Status = "waiting" | "playing" | "ended";
+
+// --- クライアントからのWSメッセージ ---
+export type WSMessage = {
+  event: string; // join / leave / move / reset など
+  data?: Record<string, any>;
 };
 
-// Initイベントのデータ型
-export type InitData = {
-  black: boolean;
-  white: boolean;
-  status: RoomStatus;
-};
-
-// SSEイベント共通型
-export type SSEEvent<T> = {
+// --- サーバーから単発レスポンス（リクエスト投げた人だけに返す）---
+export interface ResponseMessage {
   event: string;
-  data: T;
-};
+  token?: string;   // 新規発行されたトークン
+  role?: Seat;      // black / white / observer
+  status?: Status;
+  stats?: any;      // 統計（必要なら）
+  error?: string;
+}
 
-// Joinのレスポンス
-export type JoinResponse = {
-  token: string;
-};
+// --- サーバーからブロードキャスト（全クライアントへ配信）---
+export interface BroadcastMessage {
+  event: string;    // join / leave / move / reset など
+  black: boolean;   // black が埋まってるか
+  white: boolean;   // white が埋まってるか
+  status: Status;   // 現在の状態
+  board: string[];  // 8行8文字の配列
+}
 
-// 共通レスポンス（汎用的に使える）
-export type CommonResponse = {
-  action: string;
-  [key: string]: any;
+// --- Join ロジックの返却型 ---
+export type JoinResult = {
+  role: "black" | "white" | "observer";
+  token?: string;
 };

@@ -1,50 +1,100 @@
-import { SSEManager } from "./SSEManager";
-import type { Seat, RoomStatus, InitData } from "./types";
+import { Seat, Status, BroadcastMessage } from "./types";
 
 export class Room {
-  black: string | null = null;
-  white: string | null = null;
-  observers: string[] = [];
-  status: RoomStatus = "waiting";
+  // 黒と白の token（プレイヤー専用）
+  private blackToken: string | null = null;
+  private whiteToken: string | null = null;
 
-  sse?: SSEManager;
+  // 接続中の WebSocket（observer 含む）
+  private sessions: Set<WebSocket> = new Set();
+
+  // ボードの状態
+  public board: string[];
+
+  // 現在のステータス
+  public status: Status = "waiting";
+
+  // 定数ボード
+  public static readonly InitialBoard: string[] = [
+    "--------",
+    "--------",
+    "--------",
+    "---WB---",
+    "---BW---",
+    "--------",
+    "--------",
+    "--------",
+  ];
+
+  public static readonly FlatBoard: string[] = [
+    "--------",
+    "--------",
+    "--------",
+    "--------",
+    "--------",
+    "--------",
+    "--------",
+    "--------",
+  ];
 
   constructor() {
-    // SSEManager はまだ作らない
-    // 初めて /sse が呼ばれたときに作る
+    this.board = [...Room.InitialBoard];
   }
 
-  // --- セッション追加 ---
-  addSession(token: string, seat: Seat) {
-    if (seat === "black") this.black = token;
-    else if (seat === "white") this.white = token;
-    else this.observers.push(token);
+  // プレイヤー token を割り当てる
+  assignSeat(seat: Seat, token: string): void {
+    if (seat === "black") {
+      this.blackToken = token;
+    } else if (seat === "white") {
+      this.whiteToken = token;
+    }
   }
 
-  // --- セッション削除 ---
-  removeSession(token: string) {
-    if (this.black === token) this.black = null;
-    if (this.white === token) this.white = null;
-    this.observers = this.observers.filter(t => t !== token);
+  // プレイヤー token を外す
+  removeSeat(seat: Seat): void {
+    if (seat === "black") {
+      this.blackToken = null;
+    } else if (seat === "white") {
+      this.whiteToken = null;
+    }
   }
 
-  // --- Init データを作成 ---
-  makeInit(): InitData {
+  // token から seat を逆参照（observer は null 扱い）
+  getSeatByToken(token: string): Seat | null {
+    if (this.blackToken === token) return "black";
+    if (this.whiteToken === token) return "white";
+    return null;
+  }
+
+  // WS セッションを追加
+  addSession(ws: WebSocket): void {
+    this.sessions.add(ws);
+  }
+
+  // WS セッションを削除
+  removeSession(ws: WebSocket): void {
+    this.sessions.delete(ws);
+  }
+
+  // 現在の状態を作る
+  getState(): BroadcastMessage {
     return {
-      black: this.black !== null,
-      white: this.white !== null,
+      black: this.blackToken !== null,
+      white: this.whiteToken !== null,
       status: this.status,
+      board: this.board,
     };
   }
 
-  // --- SSEManager 初期化 ---
-  ensureSSE(): SSEManager {
-    if (!this.sse) {
-      this.sse = new SSEManager(
-        () => this.makeInit(),
-        (token) => this.removeSession(token)
-      );
+  // 全員にブロードキャスト
+  broadcast(): void {
+    const msg = JSON.stringify(this.getState());
+    for (const ws of this.sessions) {
+      try {
+        ws.send(msg);
+      } catch {
+        this.sessions.delete(ws);
+      }
     }
-    return this.sse;
   }
 }
