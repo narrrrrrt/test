@@ -1,62 +1,66 @@
 export class RoomDO {
   state: DurableObjectState;
-  connections: Set<WritableStreamDefaultWriter>;
-  count: number;
+  env: Env;
+  sockets: Map<string, WebSocket>;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
-    this.connections = new Set();
-    this.count = 0;
+    this.env = env;
+    this.sockets = new Map();
   }
 
-  async fetch(req: Request): Promise<Response> {
-    const url = new URL(req.url);
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
 
-    if (url.pathname.endsWith("/count")) {
-      return this.handleSSE();
+    if (url.pathname.endsWith("/ws")) {
+      const token = url.searchParams.get("token");
+      if (!token) {
+        return new Response("Missing token", { status: 400 });
+      }
+
+      const [client, server] = Object.values(new WebSocketPair());
+      this.handleWS(server as WebSocket, token);
+
+      return new Response(null, { status: 101, webSocket: client });
     }
 
-    return new Response("Unknown endpoint", { status: 404 });
+    return new Response("Not found", { status: 404 });
   }
 
-  private async handleSSE(): Promise<Response> {
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
-    this.connections.add(writer);
+  private handleWS(ws: WebSocket, token: string) {
+    ws.accept();
 
-    // 接続数を +1 して全員に通知
-    this.count++;
-    this.broadcast();
+    // 登録
+    this.sockets.set(token, ws);
+    this.broadcastState();
 
-    // 🔔 クライアント切断を監視
-    const reader = readable.getReader();
-    reader.closed.then(() => {
-      this.connections.delete(writer);
-      this.count--;
-      this.broadcast();
+    ws.addEventListener("close", () => {
+      this.sockets.delete(token);
+      this.broadcastState();
     });
 
-    const headers = {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-    };
-
-    return new Response(readable, { headers });
+    ws.addEventListener("error", () => {
+      this.sockets.delete(token);
+      this.broadcastState();
+    });
   }
 
-  private broadcast() {
-    const msg =
-      `event: stats\n` +
-      `data: ${JSON.stringify({ connections: this.count })}\n\n`;
+  private broadcastState() {
+    const tokens = Array.from(this.sockets.keys());
+    const payload = JSON.stringify({
+      count: tokens.length,
+      tokens,
+    });
 
-    const encoder = new TextEncoder();
-    const data = encoder.encode(msg);
-
-    for (const writer of this.connections) {
-      writer.write(data).catch(() => {
-        // 書き込み失敗は無視
-      });
+    for (const ws of this.sockets.values()) {
+      try {
+        ws.send(payload);
+      } catch {
+        // エラーが出たソケットは削除
+        for (const [t, w] of this.sockets) {
+          if (w === ws) this.sockets.delete(t);
+        }
+      }
     }
   }
 }
