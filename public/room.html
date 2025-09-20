@@ -1,21 +1,55 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Room Client</title>
   <style>
     body { font-family: monospace; }
-    .event { margin: 4px 0; }
-    .event span { display: inline-block; width: 80px; font-weight: bold; }
+    #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 8px; height: 300px; overflow-y: auto; }
   </style>
 </head>
 <body>
   <h1>Room Client</h1>
-
   <div id="info"></div>
-  <div id="output"></div>
+  <div id="log"></div>
 
-  <!-- 外出しJS -->
-  <script src="ja/room.js"></script>
+  <script>
+    (async () => {
+      const params = new URLSearchParams(location.search);
+      const id = params.get("id") ?? "1";
+      const seat = params.get("seat") ?? "observer";
+
+      document.getElementById("info").textContent =
+        `Room ID = ${id}, Seat = ${seat}`;
+
+      // WS の URL (サーバードメインは固定でOKならここに書く)
+      const BASE = "wss://test.konayashikeitaro-84f.workers.dev";
+      const url = `${BASE}/${id}/ws`;
+
+      // 接続時に seat を送信
+      const ws = new WebSocket(url, [], {
+        headers: { "Content-Type": "application/json" }
+      });
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ seat }));
+        log("Connected, seat=" + seat);
+      };
+
+      ws.onmessage = (ev) => {
+        log("recv: " + ev.data);
+      };
+
+      ws.onclose = () => {
+        log("Closed");
+      };
+
+      function log(msg) {
+        const logDiv = document.getElementById("log");
+        logDiv.textContent += msg + "\n";
+        logDiv.scrollTop = logDiv.scrollHeight;
+      }
+    })();
+  </script>
 </body>
 </html>
